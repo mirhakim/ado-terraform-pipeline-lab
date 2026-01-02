@@ -1,0 +1,149 @@
+trigger:
+- main
+
+stages:
+
+# =========================================================
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
+# =========================================================
+- stage: PreCommit
+  displayName: 'Pre-Commit / Static & Security Analysis'
+
+  jobs:
+  - job: StaticSecurity
+    displayName: 'Terraform Static & Security'
+    pool:
+      name: linux-hosted-agent
+
+    steps:
+    - checkout: self
+
+    - bash: |
+        terraform version
+      displayName: 'Verify Terraform'
+
+    - bash: |
+        cd environments/dev
+        terraform init -backend=false
+      displayName: 'Terraform Init (No Backend)'
+
+    - bash: |
+        cd environments/dev
+        terraform fmt -check
+      displayName: 'Terraform Format Check'
+
+    - bash: |
+        cd environments/dev
+        terraform validate
+      displayName: 'Terraform Validate'
+
+    - bash: |
+        docker run --rm \
+          -v $(pwd):/tf \
+          bridgecrew/checkov \
+          -d /tf/environments/dev \
+          --framework terraform || true
+      displayName: 'Terraform Security Scan (Checkov)'
+
+
+# =========================================================
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# =========================================================
+- stage: Cost
+  displayName: 'Cost & Impact Assessment (Infracost)'
+  dependsOn: PreCommit
+  condition: succeeded()
+
+  jobs:
+  - job: Infracost
+    displayName: 'Infracost Cost Estimation'
+    pool:
+      name: linux-hosted-agent
+
+    # 🔐 EXPLICIT SECRET VARIABLE INJECTION (CRITICAL)
+    env:
+      INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+
+    steps:
+    - checkout: self
+
+    - bash: |
+        docker --version
+      displayName: 'Verify Docker'
+
+    - bash: |
+        if [ -z "$INFRACOST_API_KEY" ]; then
+          echo "❌ INFRACOST_API_KEY not available"
+          exit 1
+        fi
+        echo "✅ INFRACOST_API_KEY detected"
+      displayName: 'Verify Infracost API Key'
+
+    - bash: |
+        cd environments/dev
+        terraform init -backend=false
+
+        docker run --rm \
+          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
+          -v $(pwd):/workspace \
+          infracost/infracost breakdown \
+          --path /workspace \
+          --format table
+      displayName: 'Run Infracost Cost Breakdown'
+
+
+# =========================================================
+# STAGE 3: TERRAFORM PLAN (DEV)
+# =========================================================
+- stage: Plan
+  displayName: 'Terraform Plan (Dev)'
+  dependsOn: Cost
+  condition: succeeded()
+
+  jobs:
+  - job: TerraformPlan
+    displayName: 'Terraform Plan'
+    pool:
+      name: linux-hosted-agent
+
+    steps:
+    - checkout: self
+
+    - bash: |
+        cd environments/dev
+        terraform init
+      displayName: 'Terraform Init (Backend)'
+
+    - bash: |
+        cd environments/dev
+        terraform plan
+      displayName: 'Terraform Plan'
+
+
+# =========================================================
+# STAGE 4: TERRAFORM APPLY (DEV)
+# =========================================================
+- stage: Apply
+  displayName: 'Terraform Apply (Dev)'
+  dependsOn: Plan
+  condition: succeeded()
+
+  jobs:
+  - job: TerraformApply
+    displayName: 'Terraform Apply'
+    pool:
+      name: linux-hosted-agent
+
+    steps:
+    - checkout: self
+
+    - bash: |
+        cd environments/dev
+        terraform init
+      displayName: 'Terraform Init (Backend)'
+
+    - bash: |
+        cd environments/dev
+        terraform apply -auto-approve
+      displayName: 'Terraform Apply'
+

@@ -1,0 +1,52 @@
+trigger: none   # 🚨 NEVER auto-trigger
+
+pr: none        # 🚨 No PR trigger
+
+variables:
+  LOCATION: eastus
+  RG_NAME: rg-dev-terraform
+  ADMIN_USERNAME: azureuser
+  # ADMIN_PASSWORD stored as secret in pipeline UI
+
+stages:
+- stage: Destroy
+  displayName: 'Terraform Destroy (Dev)'
+  jobs:
+    - deployment: DestroyInfra
+      displayName: 'Destroy Terraform Infra'
+      environment: dev   # approval required
+      pool:
+        name: local-agent-pool
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+              - checkout: self
+
+              - task: TerraformTaskV4@4
+                displayName: 'Terraform Init (Destroy)'
+                inputs:
+                  provider: 'azurerm'
+                  command: 'init'
+                  workingDirectory: 'environments/dev'
+                  backendServiceArm: 'azure-terraform-conn'
+                  backendAzureRmResourceGroupName: 'rg-tf-backend'
+                  backendAzureRmStorageAccountName: 'tfstatemirhakim01'
+                  backendAzureRmContainerName: 'tfstate'
+                  backendAzureRmKey: 'dev.terraform.tfstate'
+                  commandOptions: '-reconfigure'
+
+              - task: TerraformTaskV4@4
+                displayName: 'Terraform Destroy'
+                inputs:
+                  provider: 'azurerm'
+                  command: 'destroy'
+                  workingDirectory: 'environments/dev'
+                  environmentServiceNameAzureRM: 'azure-terraform-conn'
+                  commandOptions: >
+                    -auto-approve
+                    -input=false
+                    -var="location=$(LOCATION)"
+                    -var="rg_name=$(RG_NAME)"
+                    -var="admin_username=$(ADMIN_USERNAME)"
+                    -var="admin_password=$(ADMIN_PASSWORD)"

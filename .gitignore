@@ -1,0 +1,14 @@
+# Terraform
+cat <<EOF > .gitignore
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+.crash.log
+EOF
+
+
+# OS / Editor
+.vscode/
+.DS_Store
