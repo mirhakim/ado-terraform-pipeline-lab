@@ -1,188 +1,147 @@
 trigger:
-- main
+  branches:
+    include:
+      - main
 
 pr:
-- main
+  branches:
+    include:
+      - main
+
+variables:
+  TF_VERSION: '1.6.6'
+  WORKING_DIR: '.'
 
 stages:
-
-# =========================================================
-# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
-# =========================================================
-- stage: PreCommit
-  displayName: 'Pre-Commit / Static & Security Analysis'
-
+# =========================
+# STAGE 1: Static Analysis
+# =========================
+- stage: StaticAnalysis
+  displayName: "Pre-Commit / Static & Security Analysis"
   jobs:
-  - job: StaticSecurity
-    displayName: 'Terraform Static & Security'
-    pool:
-      name: linux-hosted-agent
+    - job: TerraformStatic
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
 
-    steps:
-    - checkout: self
+        - task: Bash@3
+          displayName: Terraform Format & Validate
+          inputs:
+            targetType: inline
+            script: |
+              terraform fmt -recursive
+              terraform init -backend=false
+              terraform validate
 
-    - bash: |
-        terraform version
-      displayName: 'Verify Terraform'
-
-    - bash: |
-        cd environments/dev
-        terraform init -backend=false
-      displayName: 'Terraform Init (No Backend)'
-
-    - bash: |
-        cd environments/dev
-        terraform fmt -check
-      displayName: 'Terraform Format Check'
-
-    - bash: |
-        cd environments/dev
-        terraform validate
-      displayName: 'Terraform Validate'
-
-    - bash: |
-        docker run --rm \
-          -v $(pwd):/tf \
-          bridgecrew/checkov \
-          -d /tf/environments/dev \
-          --framework terraform || true
-      displayName: 'Terraform Security Scan (Checkov)'
-
-
-# =========================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
-# =========================================================
-- stage: Cost
-  displayName: 'Cost & Impact Assessment (Infracost)'
-  dependsOn: PreCommit
-  condition: succeeded()
-
+# =========================
+# STAGE 2: Infracost
+# =========================
+- stage: Infracost
+  displayName: "Cost & Impact Assessment (Infracost)"
+  dependsOn: StaticAnalysis
   jobs:
-  - job: Infracost
-    displayName: 'Infracost Cost Estimation'
-    pool:
-      name: linux-hosted-agent
+    - job: InfracostEstimate
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
 
-    steps:
-    - checkout: self
+        - task: Bash@3
+          displayName: Install Terraform
+          inputs:
+            targetType: inline
+            script: |
+              curl -fsSL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o terraform.zip
+              unzip terraform.zip
+              sudo mv terraform /usr/local/bin/
 
-    - bash: |
-        docker --version
-      displayName: 'Verify Docker'
+        - task: Bash@3
+          displayName: Install Infracost
+          inputs:
+            targetType: inline
+            script: |
+              curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
 
-    - bash: |
-        if [ -z "$INFRACOST_API_KEY" ]; then
-          echo "❌ INFRACOST_API_KEY not available"
-          exit 1
-        fi
-        echo "✅ INFRACOST_API_KEY detected"
-      displayName: 'Verify Infracost API Key'
-      env:
-        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+        - task: Bash@3
+          displayName: Run Infracost Cost Breakdown
+          env:
+            INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+          inputs:
+            targetType: inline
+            script: |
+              terraform init
 
-    - bash: |
-        cd environments/dev
-        terraform init -backend=false
+              terraform plan \
+                -out=tfplan.binary \
+                -var="location=eastus" \
+                -var="rg_name=infracost-rg"
 
-        docker run --rm \
-          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
-          -e TF_VAR_location=$TF_VAR_location \
-          -e TF_VAR_rg_name=$TF_VAR_rg_name \
-          -v $(pwd):/workspace \
-          infracost/infracost breakdown \
-          --path /workspace \
-          --terraform-force-parsing \
-          --format table
-      displayName: 'Run Infracost Cost Breakdown'
-      env:
-        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
-        TF_VAR_location: $(TF_VAR_location)
-        TF_VAR_rg_name: $(TF_VAR_rg_name)
+              terraform show -json tfplan.binary > plan.json
 
+              infracost breakdown \
+                --path plan.json \
+                --format table
 
-# =========================================================
-# STAGE 3: TERRAFORM PLAN (DEV)
-# =========================================================
-- stage: Plan
-  displayName: 'Terraform Plan (Dev)'
-  dependsOn: Cost
-  condition: succeeded()
-
+# =========================
+# STAGE 3: Terraform Plan
+# =========================
+- stage: TerraformPlan
+  displayName: "Terraform Plan (Dev)"
+  dependsOn: Infracost
   jobs:
-  - job: TerraformPlan
-    displayName: 'Terraform Plan'
-    pool:
-      name: linux-hosted-agent
+    - job: Plan
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
 
-    steps:
-    - checkout: self
+        - task: Bash@3
+          displayName: Terraform Plan
+          inputs:
+            targetType: inline
+            script: |
+              terraform init
+              terraform plan \
+                -out=tfplan.binary \
+                -var="location=eastus" \
+                -var="rg_name=dev-rg"
 
-    - bash: |
-        cd environments/dev
-        terraform init
-      displayName: 'Terraform Init (Backend)'
-
-    - bash: |
-        cd environments/dev
-        terraform plan
-      displayName: 'Terraform Plan'
-      env:
-        TF_VAR_location: $(TF_VAR_location)
-        TF_VAR_rg_name: $(TF_VAR_rg_name)
-
-
-# =========================================================
-# STAGE 4: MANUAL APPROVAL (GOVERNANCE)
-# =========================================================
-- stage: Approval
-  displayName: 'Manual Approval Before Apply'
-  dependsOn: Plan
-  condition: succeeded()
-
+# =========================
+# STAGE 4: Manual Approval
+# =========================
+- stage: ManualApproval
+  displayName: "Manual Approval Before Apply"
+  dependsOn: TerraformPlan
   jobs:
-  - job: ManualApproval
-    displayName: 'Approve Terraform Apply'
-    pool: server
+    - job: Approval
+      pool: server
+      steps:
+        - task: ManualValidation@0
+          inputs:
+            instructions: "Please approve to apply Terraform changes"
+            timeoutInMinutes: 1440
 
-    steps:
-    - task: ManualValidation@0
-      timeoutInMinutes: 1440
-      inputs:
-        instructions: |
-          Please review:
-          - Terraform Plan output
-          - Infracost cost estimation
-
-          Approve to proceed with Terraform Apply.
-        onTimeout: reject
-
-
-# =========================================================
-# STAGE 5: TERRAFORM APPLY (DEV)
-# =========================================================
-- stage: Apply
-  displayName: 'Terraform Apply (Dev)'
-  dependsOn: Approval
-  condition: succeeded()
-
+# =========================
+# STAGE 5: Terraform Apply
+# =========================
+- stage: TerraformApply
+  displayName: "Terraform Apply (Dev)"
+  dependsOn: ManualApproval
   jobs:
-  - job: TerraformApply
-    displayName: 'Terraform Apply'
-    pool:
-      name: linux-hosted-agent
+    - job: Apply
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
 
-    steps:
-    - checkout: self
-
-    - bash: |
-        cd environments/dev
-        terraform init
-      displayName: 'Terraform Init (Backend)'
-
-    - bash: |
-        cd environments/dev
-        terraform apply -auto-approve
-      displayName: 'Terraform Apply'
-      env:
-        TF_VAR_location: $(TF_VAR_location)
-        TF_VAR_rg_name: $(TF_VAR_rg_name)
+        - task: Bash@3
+          displayName: Terraform Apply
+          inputs:
+            targetType: inline
+            script: |
+              terraform init
+              terraform apply \
+                -auto-approve \
+                -var="location=eastus" \
+                -var="rg_name=dev-rg"
