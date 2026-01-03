@@ -49,9 +49,6 @@ stages:
 # =========================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =========================================================
-# =========================================================
-# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
-# =========================================================
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
@@ -86,6 +83,8 @@ stages:
 
         docker run --rm \
           -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
+          -e TF_VAR_location=$TF_VAR_location \
+          -e TF_VAR_rg_name=$TF_VAR_rg_name \
           -v $(pwd):/workspace \
           infracost/infracost breakdown \
           --path /workspace \
@@ -93,6 +92,9 @@ stages:
       displayName: 'Run Infracost Cost Breakdown'
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
+
 
 # =========================================================
 # STAGE 3: TERRAFORM PLAN (DEV)
@@ -120,14 +122,43 @@ stages:
         cd environments/dev
         terraform plan
       displayName: 'Terraform Plan'
+      env:
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
 
 
 # =========================================================
-# STAGE 4: TERRAFORM APPLY (DEV)
+# STAGE 4: MANUAL APPROVAL (GOVERNANCE GATE)
+# =========================================================
+- stage: Approval
+  displayName: 'Manual Approval Before Apply'
+  dependsOn: Plan
+  condition: succeeded()
+
+  jobs:
+  - job: ManualApproval
+    displayName: 'Approve Terraform Apply'
+    pool: server   # IMPORTANT: must be server
+
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440   # 24 hours
+      inputs:
+        instructions: |
+          Please review:
+          - Terraform Plan output
+          - Infracost cost estimation
+
+          Approve to proceed with Terraform Apply.
+        onTimeout: reject
+
+
+# =========================================================
+# STAGE 5: TERRAFORM APPLY (DEV)
 # =========================================================
 - stage: Apply
   displayName: 'Terraform Apply (Dev)'
-  dependsOn: Plan
+  dependsOn: Approval
   condition: succeeded()
 
   jobs:
@@ -148,4 +179,6 @@ stages:
         cd environments/dev
         terraform apply -auto-approve
       displayName: 'Terraform Apply'
-
+      env:
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
