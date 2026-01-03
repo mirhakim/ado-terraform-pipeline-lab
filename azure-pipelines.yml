@@ -36,51 +36,34 @@ stages:
 # =========================
 # STAGE 2: Infracost
 # =========================
-- stage: Infracost
-  displayName: "Cost & Impact Assessment (Infracost)"
-  dependsOn: StaticAnalysis
-  jobs:
-    - job: InfracostEstimate
-      pool:
-        name: linux-hosted-agent
-      steps:
-        - checkout: self
+- script: |
+    terraform init -reconfigure
 
-        - script: |
-            terraform init
-            terraform plan \
-              -out=tfplan.binary \
-              -var="location=$(LOCATION)" \
-              -var="rg_name=$(RG_NAME)"
-            terraform show -json tfplan.binary > plan.json
-            infracost breakdown --path plan.json --format table
-          workingDirectory: $(TF_WORKING_DIR)
-          env:
-            INFRACOST_API_KEY: $(INFRACOST_API_KEY)
-          displayName: Run Infracost Cost Breakdown
+    terraform plan \
+      -out=tfplan.binary \
+      -var="location=$(LOCATION)" \
+      -var="rg_name=$(RG_NAME)"
+
+    terraform show -json tfplan.binary > plan.json
+
+    infracost breakdown --path plan.json --format table
+  workingDirectory: $(TF_WORKING_DIR)
+  env:
+    INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+  displayName: Run Infracost Cost Breakdown
 
 # =========================
 # STAGE 3: Terraform Plan
 # =========================
-- stage: TerraformPlan
-  displayName: "Terraform Plan (Dev)"
-  dependsOn: Infracost
-  jobs:
-    - job: Plan
-      pool:
-        name: linux-hosted-agent
-      steps:
-        - checkout: self
+- script: |
+    terraform init -reconfigure
 
-        - script: |
-            terraform init
-            terraform plan \
-              -out=tfplan.binary \
-              -var="location=$(LOCATION)" \
-              -var="rg_name=$(RG_NAME)"
-          workingDirectory: $(TF_WORKING_DIR)
-          displayName: Terraform Plan
-
+    terraform plan \
+      -out=tfplan.binary \
+      -var="location=$(LOCATION)" \
+      -var="rg_name=$(RG_NAME)"
+  workingDirectory: $(TF_WORKING_DIR)
+  displayName: Terraform Plan
 
 # =========================
 # STAGE 4: Manual Approval
