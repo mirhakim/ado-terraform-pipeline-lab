@@ -1,9 +1,3 @@
-variables:
-  TF_WORKING_DIR: environments/dev
-  LOCATION: eastus
-  RG_NAME: dev-rg
-
-
 trigger:
   branches:
     include:
@@ -14,12 +8,17 @@ pr:
     include:
       - main
 
+variables:
+  TF_WORKING_DIR: environments/dev
+  LOCATION: eastus
+  RG_NAME: dev-rg
+
+stages:
 # =========================
 # STAGE 1: Static Analysis
 # =========================
-stages:
 - stage: StaticAnalysis
-  displayName: "Pre-Commit / Static & Security Analysis"
+  displayName: Pre-Commit / Static & Security Analysis
   jobs:
     - job: TerraformStatic
       pool:
@@ -31,45 +30,68 @@ stages:
             terraform fmt -recursive
             terraform init -backend=false
             terraform validate
-          displayName: Terraform Format & Validate
+          workingDirectory: $(TF_WORKING_DIR)
+          displayName: Terraform Static Checks
 
 # =========================
 # STAGE 2: Infracost
 # =========================
-- script: |
-    terraform init -reconfigure
+- stage: Infracost
+  displayName: Cost & Impact Assessment (Infracost)
+  dependsOn: StaticAnalysis
+  jobs:
+    - job: InfracostEstimate
+      pool:
+        name: linux-hosted-agent
+      steps:
+        - checkout: self
 
-    terraform plan \
-      -out=tfplan.binary \
-      -var="location=$(LOCATION)" \
-      -var="rg_name=$(RG_NAME)"
+        - script: |
+            terraform init -reconfigure
 
-    terraform show -json tfplan.binary > plan.json
+            terraform plan \
+              -out=tfplan.binary \
+              -var="location=$(LOCATION)" \
+              -var="rg_name=$(RG_NAME)"
 
-    infracost breakdown --path plan.json --format table
-  workingDirectory: $(TF_WORKING_DIR)
-  env:
-    INFRACOST_API_KEY: $(INFRACOST_API_KEY)
-  displayName: Run Infracost Cost Breakdown
+            terraform show -json tfplan.binary > plan.json
+
+            infracost breakdown \
+              --path plan.json \
+              --format table
+          workingDirectory: $(TF_WORKING_DIR)
+          env:
+            INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+          displayName: Run Infracost Cost Breakdown
 
 # =========================
 # STAGE 3: Terraform Plan
 # =========================
-- script: |
-    terraform init -reconfigure
+- stage: TerraformPlan
+  displayName: Terraform Plan (Dev)
+  dependsOn: Infracost
+  jobs:
+    - job: Plan
+      pool:
+        name: linux-hosted-agent
+      steps:
+        - checkout: self
 
-    terraform plan \
-      -out=tfplan.binary \
-      -var="location=$(LOCATION)" \
-      -var="rg_name=$(RG_NAME)"
-  workingDirectory: $(TF_WORKING_DIR)
-  displayName: Terraform Plan
+        - script: |
+            terraform init -reconfigure
+
+            terraform plan \
+              -out=tfplan.binary \
+              -var="location=$(LOCATION)" \
+              -var="rg_name=$(RG_NAME)"
+          workingDirectory: $(TF_WORKING_DIR)
+          displayName: Terraform Plan
 
 # =========================
 # STAGE 4: Manual Approval
 # =========================
 - stage: ManualApproval
-  displayName: "Manual Approval Before Apply"
+  displayName: Manual Approval Before Apply
   dependsOn: TerraformPlan
   jobs:
     - job: Approval
@@ -78,14 +100,14 @@ stages:
         - task: ManualValidation@0
           inputs:
             instructions: |
-              Please approve to proceed with Terraform Apply to DEV.
+              Please approve to proceed with Terraform Apply (Dev).
             timeoutInMinutes: 1440
 
 # =========================
 # STAGE 5: Terraform Apply
 # =========================
 - stage: TerraformApply
-  displayName: "Terraform Apply (Dev)"
+  displayName: Terraform Apply (Dev)
   dependsOn: ManualApproval
   jobs:
     - job: Apply
@@ -95,9 +117,11 @@ stages:
         - checkout: self
 
         - script: |
-            terraform init
+            terraform init -reconfigure
+
             terraform apply \
               -auto-approve \
               -var="location=$(LOCATION)" \
               -var="rg_name=$(RG_NAME)"
+          workingDirectory: $(TF_WORKING_DIR)
           displayName: Terraform Apply
