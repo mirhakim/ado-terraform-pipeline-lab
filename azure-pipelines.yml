@@ -1,3 +1,9 @@
+variables:
+  TF_WORKING_DIR: environments/dev
+  LOCATION: eastus
+  RG_NAME: dev-rg
+
+
 trigger:
   branches:
     include:
@@ -46,38 +52,17 @@ stages:
         - checkout: self
 
         - script: |
-            cd $(TF_WORKING_DIR)
-            pwd
-            ls -la
-          
-        - script: |
-            if ! command -v infracost &> /dev/null; then
-              echo "Installing Infracost..."
-              curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
-            else
-              echo "Infracost already installed"
-            fi
-          displayName: Install Infracost
-
-        - script: |
-            cd $(TF_WORKING_DIR)
-
             terraform init
-
             terraform plan \
               -out=tfplan.binary \
               -var="location=$(LOCATION)" \
               -var="rg_name=$(RG_NAME)"
-
             terraform show -json tfplan.binary > plan.json
-
-            infracost breakdown \
-              --path plan.json \
-              --format table
+            infracost breakdown --path plan.json --format table
+          workingDirectory: $(TF_WORKING_DIR)
           env:
             INFRACOST_API_KEY: $(INFRACOST_API_KEY)
           displayName: Run Infracost Cost Breakdown
-
 
 # =========================
 # STAGE 3: Terraform Plan
@@ -98,7 +83,9 @@ stages:
               -out=tfplan.binary \
               -var="location=$(LOCATION)" \
               -var="rg_name=$(RG_NAME)"
+          workingDirectory: $(TF_WORKING_DIR)
           displayName: Terraform Plan
+
 
 # =========================
 # STAGE 4: Manual Approval
