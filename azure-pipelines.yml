@@ -9,18 +9,20 @@ pr:
       - main
 
 variables:
-  WORKING_DIR: '.'
+  TF_WORKING_DIR: '.'
+  LOCATION: 'eastus'
+  RG_NAME: 'dev-rg'
 
-stages:
 # =========================
 # STAGE 1: Static Analysis
 # =========================
+stages:
 - stage: StaticAnalysis
   displayName: "Pre-Commit / Static & Security Analysis"
   jobs:
     - job: TerraformStatic
       pool:
-        name: linux-self-hosted   # ✅ SELF-HOSTED AGENT
+        name: linux-hosted-agent
       steps:
         - checkout: self
 
@@ -39,7 +41,7 @@ stages:
   jobs:
     - job: InfracostEstimate
       pool:
-        name: linux-self-hosted   # ✅ SELF-HOSTED AGENT
+        name: linux-hosted-agent
       steps:
         - checkout: self
 
@@ -48,8 +50,8 @@ stages:
 
             terraform plan \
               -out=tfplan.binary \
-              -var="location=eastus" \
-              -var="rg_name=infracost-rg"
+              -var="location=$(LOCATION)" \
+              -var="rg_name=$(RG_NAME)"
 
             terraform show -json tfplan.binary > plan.json
 
@@ -69,7 +71,7 @@ stages:
   jobs:
     - job: Plan
       pool:
-        name: linux-self-hosted   # ✅ SELF-HOSTED AGENT
+        name: linux-hosted-agent
       steps:
         - checkout: self
 
@@ -77,8 +79,8 @@ stages:
             terraform init
             terraform plan \
               -out=tfplan.binary \
-              -var="location=eastus" \
-              -var="rg_name=dev-rg"
+              -var="location=$(LOCATION)" \
+              -var="rg_name=$(RG_NAME)"
           displayName: Terraform Plan
 
 # =========================
@@ -93,7 +95,8 @@ stages:
       steps:
         - task: ManualValidation@0
           inputs:
-            instructions: "Approve Terraform Apply to Dev environment"
+            instructions: |
+              Please approve to proceed with Terraform Apply to DEV.
             timeoutInMinutes: 1440
 
 # =========================
@@ -105,7 +108,7 @@ stages:
   jobs:
     - job: Apply
       pool:
-        name: linux-self-hosted   # ✅ SELF-HOSTED AGENT
+        name: linux-hosted-agent
       steps:
         - checkout: self
 
@@ -113,6 +116,6 @@ stages:
             terraform init
             terraform apply \
               -auto-approve \
-              -var="location=eastus" \
-              -var="rg_name=dev-rg"
+              -var="location=$(LOCATION)" \
+              -var="rg_name=$(RG_NAME)"
           displayName: Terraform Apply
