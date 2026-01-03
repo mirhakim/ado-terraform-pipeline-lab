@@ -46,6 +46,22 @@ stages:
         - checkout: self
 
         - script: |
+            cd $(TF_WORKING_DIR)
+            pwd
+            ls -la
+          
+        - script: |
+            if ! command -v infracost &> /dev/null; then
+              echo "Installing Infracost..."
+              curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
+            else
+              echo "Infracost already installed"
+            fi
+          displayName: Install Infracost
+
+        - script: |
+            cd $(TF_WORKING_DIR)
+
             terraform init
 
             terraform plan \
@@ -61,6 +77,7 @@ stages:
           env:
             INFRACOST_API_KEY: $(INFRACOST_API_KEY)
           displayName: Run Infracost Cost Breakdown
+
 
 # =========================
 # STAGE 3: Terraform Plan
