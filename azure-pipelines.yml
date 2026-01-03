@@ -49,6 +49,9 @@ stages:
 # =========================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =========================================================
+# =========================================================
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# =========================================================
 - stage: Cost
   displayName: 'Cost & Impact Assessment (Infracost)'
   dependsOn: PreCommit
@@ -59,10 +62,6 @@ stages:
     displayName: 'Infracost Cost Estimation'
     pool:
       name: linux-hosted-agent
-
-    # 🔐 EXPLICIT SECRET VARIABLE INJECTION (CRITICAL)
-    env:
-      INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
     steps:
     - checkout: self
@@ -78,6 +77,8 @@ stages:
         fi
         echo "✅ INFRACOST_API_KEY detected"
       displayName: 'Verify Infracost API Key'
+      env:
+        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
     - bash: |
         cd environments/dev
@@ -90,7 +91,8 @@ stages:
           --path /workspace \
           --format table
       displayName: 'Run Infracost Cost Breakdown'
-
+      env:
+        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
 # =========================================================
 # STAGE 3: TERRAFORM PLAN (DEV)
