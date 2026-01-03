@@ -1,6 +1,9 @@
 trigger:
 - main
 
+pr:
+- main
+
 stages:
 
 # =========================================================
@@ -88,6 +91,7 @@ stages:
           -v $(pwd):/workspace \
           infracost/infracost breakdown \
           --path /workspace \
+          --terraform-force-parsing \
           --format table
       displayName: 'Run Infracost Cost Breakdown'
       env:
@@ -128,7 +132,7 @@ stages:
 
 
 # =========================================================
-# STAGE 4: MANUAL APPROVAL (GOVERNANCE GATE)
+# STAGE 4: MANUAL APPROVAL (GOVERNANCE)
 # =========================================================
 - stage: Approval
   displayName: 'Manual Approval Before Apply'
@@ -138,11 +142,11 @@ stages:
   jobs:
   - job: ManualApproval
     displayName: 'Approve Terraform Apply'
-    pool: server   # IMPORTANT: must be server
+    pool: server
 
     steps:
     - task: ManualValidation@0
-      timeoutInMinutes: 1440   # 24 hours
+      timeoutInMinutes: 1440
       inputs:
         instructions: |
           Please review:
