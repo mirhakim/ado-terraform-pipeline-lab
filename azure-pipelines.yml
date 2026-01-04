@@ -45,7 +45,6 @@ stages:
           --framework terraform || true
       displayName: 'Terraform Security Scan (Checkov)'
 
-
 # =========================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =========================================================
@@ -63,13 +62,15 @@ stages:
     steps:
     - checkout: self
 
+    # Verify Docker
     - bash: |
         docker --version
       displayName: 'Verify Docker'
 
+    # Verify Infracost API Key
     - bash: |
         if [ -z "$INFRACOST_API_KEY" ]; then
-          echo "❌ INFRACOST_API_KEY not available"
+          echo "❌ INFRACOST_API_KEY not set"
           exit 1
         fi
         echo "✅ INFRACOST_API_KEY detected"
@@ -77,24 +78,45 @@ stages:
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
+    # Terraform Init (NO backend)
     - bash: |
         cd environments/dev
         terraform init -backend=false
+      displayName: 'Terraform Init (No Backend)'
 
+    # Terraform Plan for Infracost
+    - bash: |
+        cd environments/dev
+        terraform plan -out=tfplan
+      displayName: 'Terraform Plan (for Infracost)'
+      env:
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
+        TF_VAR_admin_password: $(TF_VAR_admin_password)
+
+    # Convert plan to JSON
+    - bash: |
+        cd environments/dev
+        terraform show -json tfplan > plan.json
+      displayName: 'Generate plan.json'
+
+    # Install Infracost
+    - bash: |
+        docker pull infracost/infracost
+      displayName: 'Install Infracost'
+
+    # Run Infracost using plan.json
+    - bash: |
+        cd environments/dev
         docker run --rm \
           -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
-          -e TF_VAR_location=$TF_VAR_location \
-          -e TF_VAR_rg_name=$TF_VAR_rg_name \
           -v $(pwd):/workspace \
           infracost/infracost breakdown \
-          --path /workspace \
+          --path /workspace/plan.json \
           --format table
       displayName: 'Run Infracost Cost Breakdown'
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
-        TF_VAR_location: $(TF_VAR_location)
-        TF_VAR_rg_name: $(TF_VAR_rg_name)
-
 
 # =========================================================
 # STAGE 3: TERRAFORM PLAN (DEV)
@@ -126,7 +148,6 @@ stages:
         TF_VAR_location: $(TF_VAR_location)
         TF_VAR_rg_name: $(TF_VAR_rg_name)
 
-
 # =========================================================
 # STAGE 4: MANUAL APPROVAL (GOVERNANCE GATE)
 # =========================================================
@@ -151,7 +172,6 @@ stages:
 
           Approve to proceed with Terraform Apply.
         onTimeout: reject
-
 
 # =========================================================
 # STAGE 5: TERRAFORM APPLY (DEV)
