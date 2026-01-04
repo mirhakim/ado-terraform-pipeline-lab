@@ -20,6 +20,7 @@ stages:
     - checkout: self
 
     - script: |
+        terraform init -backend=false
         terraform fmt -check
         terraform validate
       displayName: "Terraform Format & Validate"
