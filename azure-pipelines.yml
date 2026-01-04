@@ -76,39 +76,28 @@ stages:
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
-    # IMPORTANT: init + plan in SAME STEP
-    - bash: |
-        cd environments/dev
-
-        terraform init -backend=false -reconfigure
-
-        terraform plan -out=tfplan
-      displayName: 'Terraform Init & Plan (Local, No Backend)'
-      env:
-        TF_VAR_location: $(TF_VAR_location)
-        TF_VAR_rg_name: $(TF_VAR_rg_name)
-        TF_VAR_admin_password: $(TF_VAR_admin_password)
-
-    - bash: |
-        cd environments/dev
-        terraform show -json tfplan > plan.json
-      displayName: 'Generate plan.json'
-
     - bash: |
         docker pull infracost/infracost
-      displayName: 'Install Infracost'
+      displayName: 'Pull Infracost Image'
 
     - bash: |
-        cd environments/dev
         docker run --rm \
           -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
           -v $(pwd):/workspace \
           infracost/infracost breakdown \
-          --path /workspace/plan.json \
+          --path /workspace/environments/dev \
+          --terraform-var location=$TF_VAR_location \
+          --terraform-var rg_name=$TF_VAR_rg_name \
+          --terraform-var vm_size=$TF_VAR_vm_size \
+          --terraform-var admin_password=$TF_VAR_admin_password \
           --format table
       displayName: 'Run Infracost Cost Breakdown'
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
+        TF_VAR_vm_size: $(TF_VAR_vm_size)
+        TF_VAR_admin_password: $(TF_VAR_admin_password)
 
 
 # =========================================================
