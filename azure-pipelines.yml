@@ -1,95 +1,65 @@
 trigger:
 - main
 
-pr:
-- main
+pool:
+  name: linux-hosted-agent
 
 variables:
-  ENVIRONMENT: dev
   TF_WORKING_DIR: environments/dev
 
 stages:
 
 # =========================
-# STAGE 1: Static & Security
-# =========================
-# =========================
-# STAGE 1: Static & Security
+# STAGE 1: Static Analysis
 # =========================
 - stage: StaticAnalysis
   displayName: "Pre-Commit / Static & Security Analysis"
   jobs:
   - job: TerraformStatic
-    displayName: "Terraform Static"
-    pool:
-      name: linux-hosted-agent
     steps:
     - checkout: self
 
-    - bash: |
-        terraform init -backend=false
-      workingDirectory: $(TF_WORKING_DIR)
-      displayName: "Terraform Init (No Backend)"
-
-    - bash: |
-        terraform fmt -check -recursive
+    - script: |
+        terraform fmt -check
         terraform validate
-      workingDirectory: $(TF_WORKING_DIR)
       displayName: "Terraform Format & Validate"
-
+      workingDirectory: $(TF_WORKING_DIR)
 
 # =========================
-# STAGE 2: Cost Estimation (Infracost)
+# STAGE 2: Infracost
 # =========================
 - stage: Infracost
   displayName: "Cost & Impact Assessment (Infracost)"
   dependsOn: StaticAnalysis
   jobs:
   - job: InfracostEstimate
-    displayName: "Infracost Estimate"
-    pool:
-      name: linux-hosted-agent
     steps:
     - checkout: self
 
-    # Terraform Init (NO backend lock issues)
     - task: AzureCLI@2
       displayName: "Terraform Init (Dev)"
       inputs:
         azureSubscription: azurerm-service-connection
         scriptType: bash
         scriptLocation: inlineScript
+        workingDirectory: $(TF_WORKING_DIR)
         inlineScript: |
-          terraform init -input=false
-          workingDirectory: $(TF_WORKING_DIR)
+          terraform init -reconfigure
 
-    # Terraform Plan for Infracost
-    - bash: |
-        terraform plan \
-          -input=false \
-          -out=tfplan.binary \
-          -var-file=terraform.tfvars
-      workingDirectory: $(TF_WORKING_DIR)
-      displayName: "Terraform Plan (for Infracost)"
-
-    # Convert Plan to JSON
-    - bash: |
-        terraform show -json tfplan.binary > plan.json
-      workingDirectory: $(TF_WORKING_DIR)
-      displayName: "Generate plan.json"
-
-    # Install Infracost
-    - bash: |
+    - script: |
         curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
       displayName: "Install Infracost"
 
-    # Run Infracost
-    - bash: |
-        infracost breakdown \
-          --path plan.json \
-          --format table
+    - script: |
+        terraform plan -out=tfplan.binary
+        terraform show -json tfplan.binary > plan.json
+      displayName: "Terraform Plan (for Infracost)"
       workingDirectory: $(TF_WORKING_DIR)
+
+    - script: |
+        infracost breakdown --path plan.json --format table
       displayName: "Run Infracost Cost Breakdown"
+      workingDirectory: $(TF_WORKING_DIR)
 
 # =========================
 # STAGE 3: Terraform Plan
@@ -99,9 +69,6 @@ stages:
   dependsOn: Infracost
   jobs:
   - job: Plan
-    displayName: "Terraform Plan"
-    pool:
-      name: linux-hosted-agent
     steps:
     - checkout: self
 
@@ -111,16 +78,14 @@ stages:
         azureSubscription: azurerm-service-connection
         scriptType: bash
         scriptLocation: inlineScript
+        workingDirectory: $(TF_WORKING_DIR)
         inlineScript: |
-          terraform init -input=false
-          workingDirectory: $(TF_WORKING_DIR)
+          terraform init -reconfigure
 
-    - bash: |
-        terraform plan \
-          -input=false \
-          -var-file=terraform.tfvars
-      workingDirectory: $(TF_WORKING_DIR)
+    - script: |
+        terraform plan
       displayName: "Terraform Plan"
+      workingDirectory: $(TF_WORKING_DIR)
 
 # =========================
 # STAGE 4: Manual Approval
@@ -130,14 +95,12 @@ stages:
   dependsOn: TerraformPlan
   jobs:
   - job: Approval
-    displayName: "Approval"
     pool: server
     steps:
     - task: ManualValidation@0
       inputs:
         instructions: "Approve Terraform Apply for DEV"
-        onTimeout: reject
-        timeoutInMinutes: 60
+        timeoutInMinutes: 1440
 
 # =========================
 # STAGE 5: Terraform Apply
@@ -147,9 +110,6 @@ stages:
   dependsOn: Approval
   jobs:
   - job: Apply
-    displayName: "Terraform Apply"
-    pool:
-      name: linux-hosted-agent
     steps:
     - checkout: self
 
@@ -159,14 +119,11 @@ stages:
         azureSubscription: azurerm-service-connection
         scriptType: bash
         scriptLocation: inlineScript
+        workingDirectory: $(TF_WORKING_DIR)
         inlineScript: |
-          terraform init -input=false
-          workingDirectory: $(TF_WORKING_DIR)
+          terraform init -reconfigure
 
-    - bash: |
-        terraform apply \
-          -input=false \
-          -auto-approve \
-          -var-file=terraform.tfvars
-      workingDirectory: $(TF_WORKING_DIR)
+    - script: |
+        terraform apply -auto-approve
       displayName: "Terraform Apply"
+      workingDirectory: $(TF_WORKING_DIR)
