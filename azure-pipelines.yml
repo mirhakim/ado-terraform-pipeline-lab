@@ -45,7 +45,7 @@ stages:
           --framework terraform || true
       displayName: 'Terraform Security Scan (Checkov)'
 
-# =========================================================
+ # =========================================================
 # STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
 # =========================================================
 - stage: Cost
@@ -78,17 +78,16 @@ stages:
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
-    # Terraform Init (DISABLE backend + reconfigure)
+    # Terraform Init + Plan (NO BACKEND) — SAME STEP
     - bash: |
         cd environments/dev
-        terraform init -backend=false -reconfigure
-      displayName: 'Terraform Init (No Backend for Infracost)'
 
-    # Terraform Plan (local only)
-    - bash: |
-        cd environments/dev
-        terraform plan -out=tfplan
-      displayName: 'Terraform Plan (for Infracost)'
+        terraform init -backend=false -reconfigure
+
+        terraform plan \
+          -backend=false \
+          -out=tfplan
+      displayName: 'Terraform Init & Plan (No Backend for Infracost)'
       env:
         TF_VAR_location: $(TF_VAR_location)
         TF_VAR_rg_name: $(TF_VAR_rg_name)
@@ -100,7 +99,7 @@ stages:
         terraform show -json tfplan > plan.json
       displayName: 'Generate plan.json'
 
-    # Pull Infracost image
+    # Install Infracost
     - bash: |
         docker pull infracost/infracost
       displayName: 'Install Infracost'
