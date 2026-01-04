@@ -131,6 +131,7 @@ stages:
       env:
         TF_VAR_location: $(TF_VAR_location)
         TF_VAR_rg_name: $(TF_VAR_rg_name)
+        TF_VAR_admin_password: $(TF_VAR_admin_password)
 
 
 # =========================================================
