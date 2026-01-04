@@ -133,6 +133,10 @@ stages:
         TF_VAR_rg_name: $(TF_VAR_rg_name)
         TF_VAR_admin_username: $(TF_VAR_admin_username)
         TF_VAR_admin_password: $(TF_VAR_admin_password)
+        ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+        ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+        ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+        ARM_TENANT_ID: $(ARM_TENANT_ID)
 
 
 # =========================================================
