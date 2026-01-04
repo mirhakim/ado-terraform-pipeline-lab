@@ -17,7 +17,8 @@ stages:
 
     steps:
     - checkout: self
-
+      clean: false
+      
     - bash: |
         terraform version
       displayName: 'Verify Terraform'
