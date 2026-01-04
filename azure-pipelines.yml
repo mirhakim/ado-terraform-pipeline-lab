@@ -78,13 +78,13 @@ stages:
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
-    # Terraform Init (NO backend)
+    # Terraform Init (DISABLE backend + reconfigure)
     - bash: |
         cd environments/dev
-        terraform init -backend=false
-      displayName: 'Terraform Init (No Backend)'
+        terraform init -backend=false -reconfigure
+      displayName: 'Terraform Init (No Backend for Infracost)'
 
-    # Terraform Plan for Infracost
+    # Terraform Plan (local only)
     - bash: |
         cd environments/dev
         terraform plan -out=tfplan
@@ -100,12 +100,12 @@ stages:
         terraform show -json tfplan > plan.json
       displayName: 'Generate plan.json'
 
-    # Install Infracost
+    # Pull Infracost image
     - bash: |
         docker pull infracost/infracost
       displayName: 'Install Infracost'
 
-    # Run Infracost using plan.json
+    # Run Infracost
     - bash: |
         cd environments/dev
         docker run --rm \
