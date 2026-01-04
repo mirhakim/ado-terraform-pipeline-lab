@@ -62,12 +62,10 @@ stages:
     steps:
     - checkout: self
 
-    # Verify Docker
     - bash: |
         docker --version
       displayName: 'Verify Docker'
 
-    # Verify Infracost API Key
     - bash: |
         if [ -z "$INFRACOST_API_KEY" ]; then
           echo "❌ INFRACOST_API_KEY not set"
@@ -78,33 +76,28 @@ stages:
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
-    # Terraform Init + Plan (NO BACKEND) — SAME STEP
+    # IMPORTANT: init + plan in SAME STEP
     - bash: |
         cd environments/dev
 
         terraform init -backend=false -reconfigure
 
-        terraform plan \
-          -backend=false \
-          -out=tfplan
-      displayName: 'Terraform Init & Plan (No Backend for Infracost)'
+        terraform plan -out=tfplan
+      displayName: 'Terraform Init & Plan (Local, No Backend)'
       env:
         TF_VAR_location: $(TF_VAR_location)
         TF_VAR_rg_name: $(TF_VAR_rg_name)
         TF_VAR_admin_password: $(TF_VAR_admin_password)
 
-    # Convert plan to JSON
     - bash: |
         cd environments/dev
         terraform show -json tfplan > plan.json
       displayName: 'Generate plan.json'
 
-    # Install Infracost
     - bash: |
         docker pull infracost/infracost
       displayName: 'Install Infracost'
 
-    # Run Infracost
     - bash: |
         cd environments/dev
         docker run --rm \
@@ -116,6 +109,7 @@ stages:
       displayName: 'Run Infracost Cost Breakdown'
       env:
         INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+
 
 # =========================================================
 # STAGE 3: TERRAFORM PLAN (DEV)
