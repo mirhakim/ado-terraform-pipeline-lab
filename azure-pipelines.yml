@@ -52,7 +52,7 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           terraform init -input=false
-      workingDirectory: $(TF_WORKING_DIR)
+          workingDirectory: $(TF_WORKING_DIR)
 
     # Terraform Plan for Infracost
     - bash: |
@@ -104,7 +104,7 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           terraform init -input=false
-      workingDirectory: $(TF_WORKING_DIR)
+          workingDirectory: $(TF_WORKING_DIR)
 
     - bash: |
         terraform plan \
@@ -152,7 +152,7 @@ stages:
         scriptLocation: inlineScript
         inlineScript: |
           terraform init -input=false
-      workingDirectory: $(TF_WORKING_DIR)
+          workingDirectory: $(TF_WORKING_DIR)
 
     - bash: |
         terraform apply \
