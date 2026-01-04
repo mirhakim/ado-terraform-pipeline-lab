@@ -13,6 +13,9 @@ stages:
 # =========================
 # STAGE 1: Static & Security
 # =========================
+# =========================
+# STAGE 1: Static & Security
+# =========================
 - stage: StaticAnalysis
   displayName: "Pre-Commit / Static & Security Analysis"
   jobs:
@@ -24,10 +27,16 @@ stages:
     - checkout: self
 
     - bash: |
+        terraform init -backend=false
+      workingDirectory: $(TF_WORKING_DIR)
+      displayName: "Terraform Init (No Backend)"
+
+    - bash: |
         terraform fmt -check -recursive
         terraform validate
       workingDirectory: $(TF_WORKING_DIR)
       displayName: "Terraform Format & Validate"
+
 
 # =========================
 # STAGE 2: Cost Estimation (Infracost)
