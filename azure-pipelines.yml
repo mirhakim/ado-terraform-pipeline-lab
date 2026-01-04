@@ -99,7 +99,6 @@ stages:
         TF_VAR_vm_size: $(TF_VAR_vm_size)
         TF_VAR_admin_password: $(TF_VAR_admin_password)
 
-
 # =========================================================
 # STAGE 3: TERRAFORM PLAN (DEV)
 # =========================================================
@@ -116,6 +115,7 @@ stages:
 
     steps:
     - checkout: self
+      clean: false   # <<< FIX FOR PERMISSION ISSUE
 
     - bash: |
         cd environments/dev
@@ -129,6 +129,7 @@ stages:
       env:
         TF_VAR_location: $(TF_VAR_location)
         TF_VAR_rg_name: $(TF_VAR_rg_name)
+
 
 # =========================================================
 # STAGE 4: MANUAL APPROVAL (GOVERNANCE GATE)
