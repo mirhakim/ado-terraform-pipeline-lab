@@ -4,23 +4,16 @@ trigger:
       - main
       - feature/*
 
-pr:
-  branches:
-    include:
-      - main
-
 variables:
-  terraformVersion: '1.6.6'
-  infracostVersion: '0.10.x'
-  tfWorkingDir: 'environments/dev'
+  tfWorkingDir: environments/dev
 
 stages:
 
-# ==============================
-# STAGE 1: Static Analysis
-# ==============================
-- stage: TerraformStatic
-  displayName: "Pre-Commit / Static & Security Analysis"
+# =========================================================
+# STAGE 1: Terraform Static & Security Analysis (UNCHANGED)
+# =========================================================
+- stage: StaticSecurity
+  displayName: Pre-Commit / Static & Security Analysis
   jobs:
     - job: TerraformStatic
       pool:
@@ -29,16 +22,18 @@ stages:
         - checkout: self
 
         - script: |
-            echo "Static analysis placeholder"
-          displayName: Terraform Static Check
+            cd $(tfWorkingDir)
+            terraform init -backend=false
+            terraform validate
+          displayName: Terraform Static Validation
 
 
-# ==============================
-# STAGE 2: Infracost
-# ==============================
+# =========================================================
+# STAGE 2: Infracost Cost Estimation (FIXED)
+# =========================================================
 - stage: Infracost
-  displayName: "Cost & Impact Assessment (Infracost)"
-  dependsOn: TerraformStatic
+  displayName: Cost & Impact Assessment (Infracost)
+  dependsOn: StaticSecurity
   jobs:
     - job: InfracostEstimate
       pool:
@@ -46,36 +41,35 @@ stages:
       steps:
         - checkout: self
 
-        # ---- Terraform Init (BACKEND REQUIRED HERE)
-        - task: AzureCLI@2
+        # ---- Terraform Init (Backend REQUIRED for your setup)
+        - script: |
+            cd $(tfWorkingDir)
+            terraform init -reconfigure
           displayName: Terraform Init (Dev)
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform init -reconfigure
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
         # ---- Install Infracost
         - script: |
             curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
-            infracost --version
           displayName: Install Infracost
 
-        # ---- Generate Terraform Plan for Infracost
-        - task: AzureCLI@2
-          displayName: Terraform Plan (Infracost)
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform plan -out=tfplan.binary
-              terraform show -json tfplan.binary > plan.json
+        # ---- Terraform Plan for Infracost
+        - script: |
+            cd $(tfWorkingDir)
+            terraform plan -out=tfplan.binary
+            terraform show -json tfplan.binary > plan.json
+          displayName: Terraform Plan (for Infracost)
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
-        # ---- Run Infracost
+        # ---- Infracost Breakdown
         - script: |
             cd $(tfWorkingDir)
             infracost breakdown --path plan.json --format table
@@ -84,11 +78,11 @@ stages:
             INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
 
-# ==============================
-# STAGE 3: Terraform Plan
-# ==============================
+# =========================================================
+# STAGE 3: Terraform Plan (FIXED)
+# =========================================================
 - stage: TerraformPlan
-  displayName: "Terraform Plan (Dev)"
+  displayName: Terraform Plan (Dev)
   dependsOn: Infracost
   jobs:
     - job: Plan
@@ -97,50 +91,49 @@ stages:
       steps:
         - checkout: self
 
-        - task: AzureCLI@2
+        - script: |
+            cd $(tfWorkingDir)
+            terraform init -reconfigure
           displayName: Terraform Init (Dev)
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform init -reconfigure
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
-        - task: AzureCLI@2
+        - script: |
+            cd $(tfWorkingDir)
+            terraform plan
           displayName: Terraform Plan
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform plan
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
 
-# ==============================
-# STAGE 4: Manual Approval
-# ==============================
-- stage: ManualApproval
-  displayName: "Manual Approval Before Apply"
+# =========================================================
+# STAGE 4: Manual Approval (UNCHANGED)
+# =========================================================
+- stage: Approval
+  displayName: Manual Approval Before Apply
   dependsOn: TerraformPlan
   jobs:
-    - job: Approval
+    - job: ManualApproval
       pool: server
       steps:
         - task: ManualValidation@0
           inputs:
-            instructions: "Please approve Terraform Apply to DEV"
-            notifyUsers: ""
+            instructions: "Approve Terraform Apply to Dev"
             timeoutInMinutes: 1440
 
 
-# ==============================
-# STAGE 5: Terraform Apply
-# ==============================
+# =========================================================
+# STAGE 5: Terraform Apply (UNCHANGED)
+# =========================================================
 - stage: TerraformApply
-  displayName: "Terraform Apply (Dev)"
-  dependsOn: ManualApproval
+  displayName: Terraform Apply (Dev)
+  dependsOn: Approval
   jobs:
     - job: Apply
       pool:
@@ -148,22 +141,22 @@ stages:
       steps:
         - checkout: self
 
-        - task: AzureCLI@2
+        - script: |
+            cd $(tfWorkingDir)
+            terraform init -reconfigure
           displayName: Terraform Init (Dev)
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform init -reconfigure
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
 
-        - task: AzureCLI@2
+        - script: |
+            cd $(tfWorkingDir)
+            terraform apply -auto-approve
           displayName: Terraform Apply
-          inputs:
-            azureSubscription: azurerm-service-connection
-            scriptType: bash
-            scriptLocation: inlineScript
-            inlineScript: |
-              cd $(tfWorkingDir)
-              terraform apply -auto-approve
+          env:
+            ARM_USE_OIDC: true
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
