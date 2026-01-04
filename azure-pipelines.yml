@@ -1,130 +1,184 @@
 trigger:
 - main
 
-pool:
-  name: linux-hosted-agent
-
-variables:
-  TF_WORKING_DIR: environments/dev
-
 stages:
 
-# =========================
-# STAGE 1: Static Analysis
-# =========================
-- stage: StaticAnalysis
-  displayName: "Pre-Commit / Static & Security Analysis"
+# =========================================================
+# STAGE 1: PRE-COMMIT / STATIC & SECURITY ANALYSIS
+# =========================================================
+- stage: PreCommit
+  displayName: 'Pre-Commit / Static & Security Analysis'
+
   jobs:
-  - job: TerraformStatic
+  - job: StaticSecurity
+    displayName: 'Terraform Static & Security'
+    pool:
+      name: linux-hosted-agent
+
     steps:
     - checkout: self
 
-    - script: |
+    - bash: |
+        terraform version
+      displayName: 'Verify Terraform'
+
+    - bash: |
+        cd environments/dev
         terraform init -backend=false
+      displayName: 'Terraform Init (No Backend)'
+
+    - bash: |
+        cd environments/dev
         terraform fmt -check
+      displayName: 'Terraform Format Check'
+
+    - bash: |
+        cd environments/dev
         terraform validate
-      displayName: "Terraform Format & Validate"
-      workingDirectory: $(TF_WORKING_DIR)
+      displayName: 'Terraform Validate'
 
-# =========================
-# STAGE 2: Infracost
-# =========================
-- stage: Infracost
-  displayName: "Cost & Impact Assessment (Infracost)"
-  dependsOn: StaticAnalysis
+    - bash: |
+        docker run --rm \
+          -v $(pwd):/tf \
+          bridgecrew/checkov \
+          -d /tf/environments/dev \
+          --framework terraform || true
+      displayName: 'Terraform Security Scan (Checkov)'
+
+
+# =========================================================
+# STAGE 2: COST & IMPACT ASSESSMENT (INFRACOST)
+# =========================================================
+- stage: Cost
+  displayName: 'Cost & Impact Assessment (Infracost)'
+  dependsOn: PreCommit
+  condition: succeeded()
+
   jobs:
-  - job: InfracostEstimate
+  - job: Infracost
+    displayName: 'Infracost Cost Estimation'
+    pool:
+      name: linux-hosted-agent
+
     steps:
     - checkout: self
 
-    - task: AzureCLI@2
-      displayName: "Terraform Init (Dev)"
-      inputs:
-        azureSubscription: azurerm-service-connection
-        scriptType: bash
-        scriptLocation: inlineScript
-        workingDirectory: $(TF_WORKING_DIR)
-        inlineScript: |
-          terraform init -reconfigure
+    - bash: |
+        docker --version
+      displayName: 'Verify Docker'
 
-    - script: |
-        curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh
-      displayName: "Install Infracost"
+    - bash: |
+        if [ -z "$INFRACOST_API_KEY" ]; then
+          echo "❌ INFRACOST_API_KEY not available"
+          exit 1
+        fi
+        echo "✅ INFRACOST_API_KEY detected"
+      displayName: 'Verify Infracost API Key'
+      env:
+        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
 
-    - script: |
-        terraform plan -out=tfplan.binary
-        terraform show -json tfplan.binary > plan.json
-      displayName: "Terraform Plan (for Infracost)"
-      workingDirectory: $(TF_WORKING_DIR)
+    - bash: |
+        cd environments/dev
+        terraform init -backend=false
 
-    - script: |
-        infracost breakdown --path plan.json --format table
-      displayName: "Run Infracost Cost Breakdown"
-      workingDirectory: $(TF_WORKING_DIR)
+        docker run --rm \
+          -e INFRACOST_API_KEY=$INFRACOST_API_KEY \
+          -e TF_VAR_location=$TF_VAR_location \
+          -e TF_VAR_rg_name=$TF_VAR_rg_name \
+          -v $(pwd):/workspace \
+          infracost/infracost breakdown \
+          --path /workspace \
+          --format table
+      displayName: 'Run Infracost Cost Breakdown'
+      env:
+        INFRACOST_API_KEY: $(INFRACOST_API_KEY)
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
 
-# =========================
-# STAGE 3: Terraform Plan
-# =========================
-- stage: TerraformPlan
-  displayName: "Terraform Plan (Dev)"
-  dependsOn: Infracost
+
+# =========================================================
+# STAGE 3: TERRAFORM PLAN (DEV)
+# =========================================================
+- stage: Plan
+  displayName: 'Terraform Plan (Dev)'
+  dependsOn: Cost
+  condition: succeeded()
+
   jobs:
-  - job: Plan
+  - job: TerraformPlan
+    displayName: 'Terraform Plan'
+    pool:
+      name: linux-hosted-agent
+
     steps:
     - checkout: self
 
-    - task: AzureCLI@2
-      displayName: "Terraform Init (Dev)"
-      inputs:
-        azureSubscription: azurerm-service-connection
-        scriptType: bash
-        scriptLocation: inlineScript
-        workingDirectory: $(TF_WORKING_DIR)
-        inlineScript: |
-          terraform init -reconfigure
+    - bash: |
+        cd environments/dev
+        terraform init
+      displayName: 'Terraform Init (Backend)'
 
-    - script: |
+    - bash: |
+        cd environments/dev
         terraform plan
-      displayName: "Terraform Plan"
-      workingDirectory: $(TF_WORKING_DIR)
+      displayName: 'Terraform Plan'
+      env:
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
 
-# =========================
-# STAGE 4: Manual Approval
-# =========================
+
+# =========================================================
+# STAGE 4: MANUAL APPROVAL (GOVERNANCE GATE)
+# =========================================================
 - stage: Approval
-  displayName: "Manual Approval Before Apply"
-  dependsOn: TerraformPlan
+  displayName: 'Manual Approval Before Apply'
+  dependsOn: Plan
+  condition: succeeded()
+
   jobs:
-  - job: Approval
-    pool: server
+  - job: ManualApproval
+    displayName: 'Approve Terraform Apply'
+    pool: server   # IMPORTANT: must be server
+
     steps:
     - task: ManualValidation@0
+      timeoutInMinutes: 1440   # 24 hours
       inputs:
-        instructions: "Approve Terraform Apply for DEV"
-        timeoutInMinutes: 1440
+        instructions: |
+          Please review:
+          - Terraform Plan output
+          - Infracost cost estimation
 
-# =========================
-# STAGE 5: Terraform Apply
-# =========================
-- stage: TerraformApply
-  displayName: "Terraform Apply (Dev)"
+          Approve to proceed with Terraform Apply.
+        onTimeout: reject
+
+
+# =========================================================
+# STAGE 5: TERRAFORM APPLY (DEV)
+# =========================================================
+- stage: Apply
+  displayName: 'Terraform Apply (Dev)'
   dependsOn: Approval
+  condition: succeeded()
+
   jobs:
-  - job: Apply
+  - job: TerraformApply
+    displayName: 'Terraform Apply'
+    pool:
+      name: linux-hosted-agent
+
     steps:
     - checkout: self
 
-    - task: AzureCLI@2
-      displayName: "Terraform Init (Dev)"
-      inputs:
-        azureSubscription: azurerm-service-connection
-        scriptType: bash
-        scriptLocation: inlineScript
-        workingDirectory: $(TF_WORKING_DIR)
-        inlineScript: |
-          terraform init -reconfigure
+    - bash: |
+        cd environments/dev
+        terraform init
+      displayName: 'Terraform Init (Backend)'
 
-    - script: |
+    - bash: |
+        cd environments/dev
         terraform apply -auto-approve
-      displayName: "Terraform Apply"
-      workingDirectory: $(TF_WORKING_DIR)
+      displayName: 'Terraform Apply'
+      env:
+        TF_VAR_location: $(TF_VAR_location)
+        TF_VAR_rg_name: $(TF_VAR_rg_name)
